@@ -3,41 +3,83 @@ defaults:
   output_stream: combined
 ---
 
-# Dart pub：嵌套 package、workspace 与 ignore
+# dart：无 Git 仓库
 
-这里运行 `publish --dry-run --skip-validation`，验证文件选择；没有上传，也没有证明发布验证会接受空包。保留 CLI 的完整输出；这里的所有文件均小于 1 KB，无需过滤或归一化。
+本文件从独立临时目录开始，全程不执行 `git init`，并断言 Git 找不到仓库。
 
-## 隔离环境 / Isolated environment
+父、子目录分别命名为 `parent`、`child`，包名也用这两个名称作后缀。`parent/child/child/inside.txt` 中最内层的 `child/` **只是普通数据目录，没有 manifest**，用于区分父规则 `/child` 究竟匹配哪里。
 
-```scrut {fail_fast: true}
-$ source "$TESTDIR/../scripts/environment.sh"
+```text
+parent/                   # 父包，没有 Git 仓库
+├── pubspec.yaml
+├── secret.txt
+└── child/                # 独立子包
+    ├── pubspec.yaml
+    ├── secret.txt
+    └── child/inside.txt  # 普通文件，检验规则锚点
 ```
 
-## 创建包含 editor 的 workspace
+第一次读 Scrut 可先看[语法示例](../syntax.md)。每个小节接着上一个小节的状态执行，输出不筛选文件。
+
+## 隔离环境
+
+```scrut {fail_fast: true}
+$ source "$TESTDIR/../../scripts/environment.sh"
+```
+
+## 创建目录，进入父包
 
 ```scrut
-$ mkdir -p repo/lib repo/editor/lib repo/editor/editor
-> cd repo
-> cat > pubspec.yaml <<'EOF'
-> name: ignore_lab_root
+$ mkdir -p parent/lib parent/child/lib parent/child/child
+> cd parent
+```
+
+下面两份 `pubspec.yaml` 声明两个独立 package。父包的 `workspace` 列出子包；子包用 `resolution: workspace` 加入。YAML 的 `sdk` 和 `- child` 前各保留两个空格。
+
+## 写入父包配置
+
+```scrut
+$ cat > pubspec.yaml <<'EOF'
+> name: ignore_lab_parent
 > version: 1.0.0
 > environment:
 >   sdk: '>=3.6.0 <4.0.0'
 > workspace:
->   - editor
+>   - child
 > EOF
-> cat > editor/pubspec.yaml <<'EOF'
-> name: ignore_lab_editor
+```
+
+## 写入子包配置
+
+```scrut
+$ cat > child/pubspec.yaml <<'EOF'
+> name: ignore_lab_child
 > version: 1.0.0
 > environment:
 >   sdk: '>=3.6.0 <4.0.0'
 > resolution: workspace
 > EOF
-> printf 'int value() => 1;\n' | tee lib/root.dart editor/lib/editor.dart >/dev/null
-> printf 'fake fixture\n' | tee secret.txt editor/secret.txt >/dev/null
-> printf 'NOT_A_SECRET=fixture\n' | tee .env editor/.env >/dev/null
-> printf 'nested data\n' > editor/editor/inside.txt
-> git init -q
+```
+
+## 写入最小代码和观察用的文件
+
+```scrut
+$ printf 'int value() => 1;\n' > lib/parent.dart
+> printf 'int value() => 1;\n' > child/lib/child.dart
+> printf 'fake fixture\n' > secret.txt
+> printf 'fake fixture\n' > child/secret.txt
+> printf 'NOT_A_SECRET=fixture\n' > .env
+> printf 'NOT_A_SECRET=fixture\n' > child/.env
+> printf 'nested data\n' > child/child/inside.txt
+```
+
+下一条 Git 命令必须以状态码 128 失败，表示此目录不在 Git 仓库内；这里只隐藏其依系统语言变化的错误文字。打包命令的 stderr 仍完整检查。
+
+## 确认没有 Git 仓库
+
+```scrut
+$ git rev-parse --is-inside-work-tree 2>/dev/null
+[128]
 ```
 
 ## 父包默认是否包含带 pubspec.yaml 的子包？
@@ -45,16 +87,16 @@ $ mkdir -p repo/lib repo/editor/lib repo/editor/editor
 ```scrut
 $ dart --suppress-analytics pub publish --dry-run --skip-validation 2>&1
 Running with `skip-validation`. No client-side validation is done.
-Publishing ignore_lab_root 1.0.0 to https://pub.dev:
-├── editor
-│   ├── editor
+Publishing ignore_lab_parent 1.0.0 to https://pub.dev:
+├── child
+│   ├── child
 │   │   └── inside.txt (<1 KB)
 │   ├── lib
-│   │   └── editor.dart (<1 KB)
+│   │   └── child.dart (<1 KB)
 │   ├── pubspec.yaml (<1 KB)
 │   └── secret.txt (<1 KB)
 ├── lib
-│   └── root.dart (<1 KB)
+│   └── parent.dart (<1 KB)
 ├── pubspec.yaml (<1 KB)
 └── secret.txt (<1 KB)
 
@@ -67,14 +109,14 @@ Package has 0 warnings.
 ## 单独选择子包
 
 ```scrut
-$ cd editor
+$ cd child
 > dart --suppress-analytics pub publish --dry-run --skip-validation 2>&1
 Running with `skip-validation`. No client-side validation is done.
-Publishing ignore_lab_editor 1.0.0 to https://pub.dev:
-├── editor
+Publishing ignore_lab_child 1.0.0 to https://pub.dev:
+├── child
 │   └── inside.txt (<1 KB)
 ├── lib
-│   └── editor.dart (<1 KB)
+│   └── child.dart (<1 KB)
 ├── pubspec.yaml (<1 KB)
 └── secret.txt (<1 KB)
 
@@ -84,16 +126,16 @@ The server may enforce additional checks.
 Package has 0 warnings.
 ```
 
-## 父 .pubignore 的 /editor：父包清单
+## 父 .pubignore 的 /child：父包清单
 
 ```scrut
 $ cd ..
-> printf '/editor\n' > .pubignore
+> printf '/child\n' > .pubignore
 > dart --suppress-analytics pub publish --dry-run --skip-validation 2>&1
 Running with `skip-validation`. No client-side validation is done.
-Publishing ignore_lab_root 1.0.0 to https://pub.dev:
+Publishing ignore_lab_parent 1.0.0 to https://pub.dev:
 ├── lib
-│   └── root.dart (<1 KB)
+│   └── parent.dart (<1 KB)
 ├── pubspec.yaml (<1 KB)
 └── secret.txt (<1 KB)
 
@@ -106,10 +148,16 @@ Package has 0 warnings.
 ## 同一规则：子包清单
 
 ```scrut
-$ cd editor
+$ cd child
 > dart --suppress-analytics pub publish --dry-run --skip-validation 2>&1
 Running with `skip-validation`. No client-side validation is done.
-Publishing ignore_lab_editor 1.0.0 to https://pub.dev:
+Publishing ignore_lab_child 1.0.0 to https://pub.dev:
+├── child
+│   └── inside.txt (<1 KB)
+├── lib
+│   └── child.dart (<1 KB)
+├── pubspec.yaml (<1 KB)
+└── secret.txt (<1 KB)
 
 Total compressed archive size: <1 KB.
 The server may enforce additional checks.
@@ -117,13 +165,19 @@ The server may enforce additional checks.
 Package has 0 warnings.
 ```
 
-## 空的子 .pubignore 能救回被忽略的包吗？
+## 增加空的子 .pubignore，结果会变吗？
 
 ```scrut
 $ : > .pubignore
 > dart --suppress-analytics pub publish --dry-run --skip-validation 2>&1
 Running with `skip-validation`. No client-side validation is done.
-Publishing ignore_lab_editor 1.0.0 to https://pub.dev:
+Publishing ignore_lab_child 1.0.0 to https://pub.dev:
+├── child
+│   └── inside.txt (<1 KB)
+├── lib
+│   └── child.dart (<1 KB)
+├── pubspec.yaml (<1 KB)
+└── secret.txt (<1 KB)
 
 Total compressed archive size: <1 KB.
 The server may enforce additional checks.
@@ -131,13 +185,21 @@ The server may enforce additional checks.
 Package has 0 warnings.
 ```
 
-## 子 .pubignore 的 !** 能救回吗？
+## 子 .pubignore 的 !** 会包含哪些文件？
 
 ```scrut
 $ printf '!**\n' > .pubignore
 > dart --suppress-analytics pub publish --dry-run --skip-validation 2>&1
 Running with `skip-validation`. No client-side validation is done.
-Publishing ignore_lab_editor 1.0.0 to https://pub.dev:
+Publishing ignore_lab_child 1.0.0 to https://pub.dev:
+├── .env (<1 KB)
+├── .pubignore (<1 KB)
+├── child
+│   └── inside.txt (<1 KB)
+├── lib
+│   └── child.dart (<1 KB)
+├── pubspec.yaml (<1 KB)
+└── secret.txt (<1 KB)
 
 Total compressed archive size: <1 KB.
 The server may enforce additional checks.
@@ -145,16 +207,18 @@ The server may enforce additional checks.
 Package has 0 warnings.
 ```
 
-## 父 /editor/editor 只排除内层目录
+## 父 /child/child 是否影响内层目录？
 
 ```scrut
 $ rm .pubignore
-> printf '/editor/editor\n' > ../.pubignore
+> printf '/child/child\n' > ../.pubignore
 > dart --suppress-analytics pub publish --dry-run --skip-validation 2>&1
 Running with `skip-validation`. No client-side validation is done.
-Publishing ignore_lab_editor 1.0.0 to https://pub.dev:
+Publishing ignore_lab_child 1.0.0 to https://pub.dev:
+├── child
+│   └── inside.txt (<1 KB)
 ├── lib
-│   └── editor.dart (<1 KB)
+│   └── child.dart (<1 KB)
 ├── pubspec.yaml (<1 KB)
 └── secret.txt (<1 KB)
 
@@ -170,11 +234,11 @@ Package has 0 warnings.
 $ printf '/secret.txt\n' > ../.pubignore
 > dart --suppress-analytics pub publish --dry-run --skip-validation 2>&1
 Running with `skip-validation`. No client-side validation is done.
-Publishing ignore_lab_editor 1.0.0 to https://pub.dev:
-├── editor
+Publishing ignore_lab_child 1.0.0 to https://pub.dev:
+├── child
 │   └── inside.txt (<1 KB)
 ├── lib
-│   └── editor.dart (<1 KB)
+│   └── child.dart (<1 KB)
 ├── pubspec.yaml (<1 KB)
 └── secret.txt (<1 KB)
 
@@ -190,12 +254,13 @@ Package has 0 warnings.
 $ printf 'secret.txt\n' > ../.pubignore
 > dart --suppress-analytics pub publish --dry-run --skip-validation 2>&1
 Running with `skip-validation`. No client-side validation is done.
-Publishing ignore_lab_editor 1.0.0 to https://pub.dev:
-├── editor
+Publishing ignore_lab_child 1.0.0 to https://pub.dev:
+├── child
 │   └── inside.txt (<1 KB)
 ├── lib
-│   └── editor.dart (<1 KB)
-└── pubspec.yaml (<1 KB)
+│   └── child.dart (<1 KB)
+├── pubspec.yaml (<1 KB)
+└── secret.txt (<1 KB)
 
 Total compressed archive size: <1 KB.
 The server may enforce additional checks.
@@ -203,18 +268,19 @@ The server may enforce additional checks.
 Package has 0 warnings.
 ```
 
-## 空的子 .pubignore 会停止父规则继承吗？
+## 父规则加空的子 .pubignore：文件仍在吗？
 
 ```scrut
 $ : > .pubignore
 > dart --suppress-analytics pub publish --dry-run --skip-validation 2>&1
 Running with `skip-validation`. No client-side validation is done.
-Publishing ignore_lab_editor 1.0.0 to https://pub.dev:
-├── editor
+Publishing ignore_lab_child 1.0.0 to https://pub.dev:
+├── child
 │   └── inside.txt (<1 KB)
 ├── lib
-│   └── editor.dart (<1 KB)
-└── pubspec.yaml (<1 KB)
+│   └── child.dart (<1 KB)
+├── pubspec.yaml (<1 KB)
+└── secret.txt (<1 KB)
 
 Total compressed archive size: <1 KB.
 The server may enforce additional checks.
@@ -222,17 +288,17 @@ The server may enforce additional checks.
 Package has 0 warnings.
 ```
 
-## 子规则 !secret.txt 是否能覆盖父文件规则？
+## 子规则 !secret.txt 对结果有何影响？
 
 ```scrut
 $ printf '!secret.txt\n' > .pubignore
 > dart --suppress-analytics pub publish --dry-run --skip-validation 2>&1
 Running with `skip-validation`. No client-side validation is done.
-Publishing ignore_lab_editor 1.0.0 to https://pub.dev:
-├── editor
+Publishing ignore_lab_child 1.0.0 to https://pub.dev:
+├── child
 │   └── inside.txt (<1 KB)
 ├── lib
-│   └── editor.dart (<1 KB)
+│   └── child.dart (<1 KB)
 ├── pubspec.yaml (<1 KB)
 └── secret.txt (<1 KB)
 
@@ -242,15 +308,21 @@ The server may enforce additional checks.
 Package has 0 warnings.
 ```
 
-## 改用父 .gitignore /editor
+## 改用父 .gitignore /child
 
 ```scrut
 $ rm .pubignore
-> printf '/editor\n' > ../.pubignore
+> printf '/child\n' > ../.pubignore
 > mv ../.pubignore ../.gitignore
 > dart --suppress-analytics pub publish --dry-run --skip-validation 2>&1
 Running with `skip-validation`. No client-side validation is done.
-Publishing ignore_lab_editor 1.0.0 to https://pub.dev:
+Publishing ignore_lab_child 1.0.0 to https://pub.dev:
+├── child
+│   └── inside.txt (<1 KB)
+├── lib
+│   └── child.dart (<1 KB)
+├── pubspec.yaml (<1 KB)
+└── secret.txt (<1 KB)
 
 Total compressed archive size: <1 KB.
 The server may enforce additional checks.
@@ -258,42 +330,28 @@ The server may enforce additional checks.
 Package has 0 warnings.
 ```
 
-## 移除 workspace 声明后是否仍被祖先忽略？
+## 移除 workspace 声明后结果会变吗？
 
 ```scrut
 $ cat > ../pubspec.yaml <<'EOF'
-> name: ignore_lab_root
+> name: ignore_lab_parent
 > version: 1.0.0
 > environment:
 >   sdk: '>=3.6.0 <4.0.0'
 > EOF
 > cat > pubspec.yaml <<'EOF'
-> name: ignore_lab_editor
+> name: ignore_lab_child
 > version: 1.0.0
 > environment:
 >   sdk: '>=3.6.0 <4.0.0'
 > EOF
 > dart --suppress-analytics pub publish --dry-run --skip-validation 2>&1
 Running with `skip-validation`. No client-side validation is done.
-Publishing ignore_lab_editor 1.0.0 to https://pub.dev:
-
-Total compressed archive size: <1 KB.
-The server may enforce additional checks.
-
-Package has 0 warnings.
-```
-
-## 没有 Git 仓库时，父规则是否仍然继承？
-
-```scrut
-$ mv ../.git "$LAB_TMP/git-backup"
-> dart --suppress-analytics pub publish --dry-run --skip-validation 2>&1
-Running with `skip-validation`. No client-side validation is done.
-Publishing ignore_lab_editor 1.0.0 to https://pub.dev:
-├── editor
+Publishing ignore_lab_child 1.0.0 to https://pub.dev:
+├── child
 │   └── inside.txt (<1 KB)
 ├── lib
-│   └── editor.dart (<1 KB)
+│   └── child.dart (<1 KB)
 ├── pubspec.yaml (<1 KB)
 └── secret.txt (<1 KB)
 
@@ -303,33 +361,32 @@ The server may enforce additional checks.
 Package has 0 warnings.
 ```
 
-## 嵌套 example 设置 publish_to: none 后会随父包出现吗？
+## 把 child 用作示例并设置 publish_to: none，还会随父包出现吗？
 
 ```scrut
 $ cd ..
 > rm .gitignore
-> mv editor example
-> cat > example/pubspec.yaml <<'EOF'
-> name: ignore_lab_example
+> cat > child/pubspec.yaml <<'EOF'
+> name: ignore_lab_child
 > publish_to: none
 > environment:
 >   sdk: '>=3.6.0 <4.0.0'
 > dependencies:
->   ignore_lab_root:
+>   ignore_lab_parent:
 >     path: ../
 > EOF
 > dart --suppress-analytics pub publish --dry-run --skip-validation 2>&1
 Running with `skip-validation`. No client-side validation is done.
-Publishing ignore_lab_root 1.0.0 to https://pub.dev:
-├── example
-│   ├── editor
+Publishing ignore_lab_parent 1.0.0 to https://pub.dev:
+├── child
+│   ├── child
 │   │   └── inside.txt (<1 KB)
 │   ├── lib
-│   │   └── editor.dart (<1 KB)
+│   │   └── child.dart (<1 KB)
 │   ├── pubspec.yaml (<1 KB)
 │   └── secret.txt (<1 KB)
 ├── lib
-│   └── root.dart (<1 KB)
+│   └── parent.dart (<1 KB)
 ├── pubspec.yaml (<1 KB)
 └── secret.txt (<1 KB)
 

@@ -16,49 +16,49 @@ $ source "$TESTDIR/../scripts/environment.sh"
 ## 创建祖先与子目录
 
 ```scrut
-$ mkdir -p repo/editor/editor
-> cd repo
+$ mkdir -p parent/child/child
+> cd parent
 > git init -q
-> printf 'fixture\n' | tee editor/public.txt editor/secret.txt editor/editor/inside.txt >/dev/null
-> printf '/editor\n' > .gitignore
+> printf 'fixture\n' | tee child/public.txt child/secret.txt child/child/inside.txt >/dev/null
+> printf '/child\n' > .gitignore
 ```
 
-## 父 /editor 排除子目录里的文件
+## 父 /child 排除子目录里的文件
 
 ```scrut
-$ git check-ignore --no-index -v editor/public.txt
-.gitignore:1:/editor\teditor/public.txt (escaped)
+$ git check-ignore --no-index -v child/public.txt
+.gitignore:1:/child\tchild/public.txt (escaped)
 ```
 
 ## 子规则 !** 不能穿过已排除的祖先
 
 ```scrut
-$ printf '!**\n' > editor/.gitignore
-> git check-ignore --no-index -v editor/public.txt
-.gitignore:1:/editor\teditor/public.txt (escaped)
+$ printf '!**\n' > child/.gitignore
+> git check-ignore --no-index -v child/public.txt
+.gitignore:1:/child\tchild/public.txt (escaped)
 ```
 
 ## 父级重新允许目录，保留独立文件过滤
 
 ```scrut
-$ rm editor/.gitignore
-> printf '/editor/\n!/editor/\nsecret.txt\n' > .gitignore
-> git check-ignore --no-index -v editor/secret.txt
-.gitignore:3:secret.txt\teditor/secret.txt (escaped)
+$ rm child/.gitignore
+> printf '/child/\n!/child/\nsecret.txt\n' > .gitignore
+> git check-ignore --no-index -v child/secret.txt
+.gitignore:3:secret.txt\tchild/secret.txt (escaped)
 ```
 
-## 父 /secret.txt 不匹配 editor/secret.txt
+## 父 /secret.txt 不匹配 child/secret.txt
 
 ```scrut
 $ printf '/secret.txt\n' > .gitignore
-> git check-ignore --no-index -v editor/secret.txt
+> git check-ignore --no-index -v child/secret.txt
 [1]
 ```
 
-## 父 /editor/editor 的锚点
+## 父 /child/child 的锚点
 
 ```scrut
-$ printf '/editor/editor\n' > .gitignore
-> git check-ignore --no-index -v editor/editor/inside.txt
-.gitignore:1:/editor/editor\teditor/editor/inside.txt (escaped)
+$ printf '/child/child\n' > .gitignore
+> git check-ignore --no-index -v child/child/inside.txt
+.gitignore:1:/child/child\tchild/child/inside.txt (escaped)
 ```

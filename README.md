@@ -2,50 +2,70 @@
 
 [![验证行为](https://github.com/peter-jerry-ye/package-ignore-lab/actions/workflows/verify.yml/badge.svg)](https://github.com/peter-jerry-ye/package-ignore-lab/actions/workflows/verify.yml)
 
-用可执行的 Markdown 验证嵌套包、workspace 和 ignore 的关系。**直接读下面的表和测试文档即可，无需翻 CI 日志。**
+用可执行的 Markdown 验证嵌套包、workspace 和 ignore 的关系。直接读结论表和测试文档即可，无需翻 CI 日志。
 
-每个测试文档先用 `mkdir`、`cat <<EOF`、`printf` 创建文件，再执行真正的打包命令。代码块中 `$` 是命令，`>` 是命令续行，其余是必须匹配的输出。GitHub Actions 用最新版工具重新执行；输出改变就失败，不会自动“更新成通过”。
+## 先看懂测试怎么写
 
-## 验证了什么
+[最小 Scrut 示例](tests/syntax.md)会创建一个文件、写入 YAML，再读回来核对内容。它也由 CI 执行。
 
-对应目录是：
+- `$ ` 是一段 shell 命令的第一行，`> ` 是同一段命令的续行；Scrut 会移除这些前缀。
+- 去掉前缀后，`cat > 文件 <<'EOF'` 是普通 Bash heredoc，`EOF` 之间的文字原样写入文件。
+- 没有这些前缀的行是预期输出，`[128]` 等独立行是预期退出码。
+
+因此“创建目录、写 parent 配置、写 child 配置、写测试文件”都是准备步骤；真正执行打包的步骤在它们之后。各步骤已拆成小节。YAML 缩进必须保留，结束标记 `EOF` 须顶格，整个 Scrut 测试放在 fenced code block 中，不能改成 Markdown 引用段落。
+
+## 分开看两个条件
+
+**是否有 Git 仓库**和**是否声明 workspace**是两项独立条件。每个包管理器有两份独立测试：
+
+| 工具 | 始终有 Git 仓库 | 始终没有 Git 仓库 |
+| --- | --- | --- |
+| Mooncake | [with-git/mooncake.md](tests/with-git/mooncake.md) | [without-git/mooncake.md](tests/without-git/mooncake.md) |
+| Dart pub | [with-git/dart.md](tests/with-git/dart.md) | [without-git/dart.md](tests/without-git/dart.md) |
+| npm | [with-git/npm.md](tests/with-git/npm.md) | [without-git/npm.md](tests/without-git/npm.md) |
+| pnpm | [with-git/pnpm.md](tests/with-git/pnpm.md) | [without-git/pnpm.md](tests/without-git/pnpm.md) |
+
+有 Git 的测试在 `parent/` 执行 `git init`，并断言 `git rev-parse --is-inside-work-tree` 输出 `true`。无 Git 的测试从全新临时目录开始，全程不执行 `git init`，并断言同一条查询命令以状态码 128 失败。测试不会中途移走 `.git` 来切换场景。
+
+目录统一为：
 
 ```text
-repo/                         # Git 根，也是父包
+parent/                      # 父包；有 Git 时也是 Git 根
 ├── <父包 manifest>
 ├── <workspace 配置>
 ├── <ignore 文件>
 ├── secret.txt
-└── editor/                   # 独立子包
+└── child/                   # 独立子包
     ├── <子包 manifest>
     ├── secret.txt
-    ├── public.txt            # Dart/MoonBit 对应 lib/*.dart / main.mbt
-    └── editor/
-        └── inside.txt        # 专门用来观察 /editor 的锚点
+    ├── <最小代码>
+    └── child/
+        └── inside.txt       # 普通文件，不是第三个包
 ```
 
-| 场景 | Mooncake | Dart pub | npm | pnpm |
-| --- | --- | --- | --- | --- |
-| 没有 ignore，打包父包 | 包含子包 | 包含子包 | 包含子包 | 包含子包 |
-| 父 ignore 写 `/editor`，打包父包 | 排除子包 | 排除子包 | 排除子包 | 排除子包 |
-| 同一条 `/editor`，进入 workspace 子包打包 | **空 ZIP** | **空文件清单** | 子包有内容，排除它里面的 `editor/` | 子包有内容，排除它里面的 `editor/` |
-| 父 ignore 写 `/secret.txt`，打包子包 | 保留子包的 `secret.txt` | 保留子包的 `secret.txt` | 排除子包的 `secret.txt` | 排除子包的 `secret.txt` |
-| 父 ignore 写 `secret.txt`，打包 workspace 子包 | 排除 | 排除 | 排除 | 排除 |
-| 上一场景中给子包加空的专用 ignore 文件 | 仍排除 | 仍排除 | 仍排除 | **重新包含** |
-| 子专用 ignore 写 `!secret.txt` | 重新包含 | 重新包含 | 重新包含 | 重新包含 |
-| 根本没有 workspace 声明，父规则是否仍继承 | Git 仓库内仍继承 | Git 仓库内仍继承 | 普通嵌套包不继承 | 普通嵌套包不继承 |
+最内层 `child/` 没有 manifest，只用于观察父规则 `/child` 的锚点：它排除的是 `parent/child/`，还是打包子包时被重新解释为 `parent/child/child/`？
 
-表中的“父 ignore”分别是 `.moonignore`、`.pubignore`、`.npmignore`、`.npmignore`。前两列的继承场景在 Git 仓库中；后两列标注 workspace 的场景都有对应 workspace 配置。不能把这些前提省略后泛化成“所有嵌套包”。
+## 已验证的结果
 
-直接查看完整输入输出：
+下面每行都**已声明 workspace，在 `parent/child/` 打包子包，ignore 规则写在 `parent/`**。专用 ignore 文件分别为 `.moonignore`、`.pubignore`、`.npmignore`、`.npmignore`。
 
-- [Mooncake：17 个测试块](tests/mooncake.md)：检查实际 ZIP 的**全部条目**；还验证移除 `moon.work`、移除 `.git`、父目录重新包含后的文件过滤。
-- [Dart：17 个测试块](tests/dart.md)：保留 dry-run **完整输出**；还验证 `publish_to: none` 的嵌套示例仍可出现在父包清单中。
-- [npm：16 个测试块](tests/npm.md)：完整文件清单、父规则锚点、allowlist，以及显式递归打包与普通打包的区别；最后检查实际 tarball。
-- [pnpm：18 个测试块](tests/pnpm.md)：相同对照，加上 `.pnpmignore` 不作为 ignore 配置、递归打包仍包含子包；最后检查实际 tarball。
-- [Git：7 个测试块](tests/git.md)：用 `git check-ignore --no-index -v` 显示命中的规则、来源和行号。
+| 父规则 | Git 仓库 | Mooncake | Dart pub | npm | pnpm |
+| --- | --- | --- | --- | --- | --- |
+| `/child` | 有 | **空 ZIP** | **空文件清单** | 有内容，排除内部 `child/` | 有内容，排除内部 `child/` |
+| `/child` | 无 | 有内容，保留内部 `child/` | 有内容，保留内部 `child/` | 有内容，排除内部 `child/` | 有内容，排除内部 `child/` |
+| `secret.txt` | 有 | 排除子包同名文件 | 排除子包同名文件 | 排除子包同名文件 | 排除子包同名文件 |
+| `secret.txt` | 无 | **保留**子包同名文件 | **保留**子包同名文件 | 排除子包同名文件 | 排除子包同名文件 |
+| `/secret.txt` | 有 | 保留子包同名文件 | 保留子包同名文件 | 排除子包同名文件 | 排除子包同名文件 |
+| `/secret.txt` | 无 | 保留子包同名文件 | 保留子包同名文件 | 排除子包同名文件 | 排除子包同名文件 |
 
-总计 **75 个可执行代码块**，包括 fixture 创建步骤。
+另外，每份测试都检查：
+
+- 没有 ignore 时，打包 parent 会包含 child；父 ignore 写 `/child` 后，打包 parent 会排除 child。这在有无 Git 时都成立。
+- npm/pnpm 从“未声明 workspace”开始：普通嵌套子包不继承父 ignore；声明 workspace 后才发生继承。有无 Git 分别验证。
+- Mooncake/Dart 还会移除 workspace 声明：有 Git 时仍继承祖先规则，无 Git 时不继承。**workspace 本身不等于 Git 仓库。**
+- 空的子 ignore、否定规则、`.gitignore` 回退等细节，直接看对应文件的完整输出。
+
+额外的 [Git 自身对照](tests/git.md)用 `git check-ignore --no-index -v` 展示命中的规则、来源和行号。
 
 ## 这些测试的边界
 
@@ -74,7 +94,8 @@ npm install --global npm@latest pnpm@latest
 ```bash
 ./scripts/test.sh
 # 或只运行一个文档：
-scrut test tests/dart.md
+scrut test tests/with-git/dart.md
+scrut test tests/without-git/dart.md
 ```
 
 Scrut 就是负责执行和比较 Markdown 的工具，无需额外的 fixture DSL。创建目录和文件的 shell 命令都在测试文档里；共用的 [environment.sh](scripts/environment.sh) 只配置临时缓存、隔离 Git 全局配置和启用 shell 错误检查。

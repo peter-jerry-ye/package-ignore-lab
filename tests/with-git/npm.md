@@ -3,33 +3,73 @@ defaults:
   output_stream: combined
 ---
 
-# npm：嵌套包与 ignore
+# npm：有 Git 仓库
 
-所有清单来自真实 CLI 的完整 `files` 字段，只排序，不筛选文件。每一步接着上一步的文件状态执行。`secret.txt` 和 `.env` 只有虚构的测试文字。
+本文件从独立临时目录开始，在 `parent/` 执行 `git init`，整个文档始终有这个 Git 仓库。
 
-## 隔离环境 / Isolated environment
+父、子目录分别命名为 `parent`、`child`，包名也用这两个名称作后缀。`parent/child/child/inside.txt` 中最内层的 `child/` **只是普通数据目录，没有 manifest**，用于区分父规则 `/child` 究竟匹配哪里。
 
-```scrut {fail_fast: true}
-$ source "$TESTDIR/../scripts/environment.sh"
+```text
+parent/                   # 父包，也是 Git 根
+├── package.json
+├── secret.txt
+└── child/                # 独立子包
+    ├── package.json
+    ├── secret.txt
+    └── child/inside.txt  # 普通文件，检验规则锚点
 ```
 
-## 创建普通嵌套包，尚未声明 workspace
+第一次读 Scrut 可先看[语法示例](../syntax.md)。每个小节接着上一个小节的状态执行，输出不筛选文件。
+
+## 隔离环境
+
+```scrut {fail_fast: true}
+$ source "$TESTDIR/../../scripts/environment.sh"
+```
+
+## 创建目录，进入父包
 
 ```scrut
-$ mkdir -p repo/editor/editor
-> cd repo
-> cat > package.json <<'EOF'
-> {"name":"ignore-lab-root","version":"1.0.0"}
+$ mkdir -p parent/child/child
+> cd parent
+```
+
+先创建两个独立包，暂不声明 workspace。后面单独添加 workspace 配置，比较同一条规则前后的结果。
+
+## 写入父包配置
+
+```scrut
+$ cat > package.json <<'EOF'
+> {"name":"ignore-lab-parent","version":"1.0.0"}
 > EOF
-> cat > editor/package.json <<'EOF'
-> {"name":"ignore-lab-editor","version":"1.0.0"}
+```
+
+## 写入子包配置
+
+```scrut
+$ cat > child/package.json <<'EOF'
+> {"name":"ignore-lab-child","version":"1.0.0"}
 > EOF
-> printf 'root\n' > root.txt
-> printf 'public\n' > editor/public.txt
-> printf 'fake fixture\n' | tee secret.txt editor/secret.txt >/dev/null
-> printf 'NOT_A_SECRET=fixture\n' | tee .env editor/.env >/dev/null
-> printf 'nested data\n' > editor/editor/inside.txt
-> git init -q
+```
+
+## 写入最小代码和观察用的文件
+
+```scrut
+$ printf 'parent\n' > parent.txt
+> printf 'public\n' > child/public.txt
+> printf 'fake fixture\n' > secret.txt
+> printf 'fake fixture\n' > child/secret.txt
+> printf 'NOT_A_SECRET=fixture\n' > .env
+> printf 'NOT_A_SECRET=fixture\n' > child/.env
+> printf 'nested data\n' > child/child/inside.txt
+```
+
+## 建立并确认 Git 仓库
+
+```scrut
+$ git init -q
+> git rev-parse --is-inside-work-tree
+true
 ```
 
 ## 默认打包父包是否包含子包？
@@ -38,13 +78,13 @@ $ mkdir -p repo/editor/editor
 $ npm pack --dry-run --json | jq '[.[].files[].path] | sort'
 [
   ".env",
-  "editor/.env",
-  "editor/editor/inside.txt",
-  "editor/package.json",
-  "editor/public.txt",
-  "editor/secret.txt",
+  "child/.env",
+  "child/child/inside.txt",
+  "child/package.json",
+  "child/public.txt",
+  "child/secret.txt",
   "package.json",
-  "root.txt",
+  "parent.txt",
   "secret.txt"
 ]
 ```
@@ -53,11 +93,11 @@ $ npm pack --dry-run --json | jq '[.[].files[].path] | sort'
 
 ```scrut
 $ printf 'secret.txt\n' > .npmignore
-> cd editor
+> cd child
 > npm pack --dry-run --json | jq '[.[].files[].path] | sort'
 [
   ".env",
-  "editor/inside.txt",
+  "child/inside.txt",
   "package.json",
   "public.txt",
   "secret.txt"
@@ -69,13 +109,13 @@ $ printf 'secret.txt\n' > .npmignore
 ```scrut
 $ cd ..
 > cat > package.json <<'EOF'
-> {"name":"ignore-lab-root","version":"1.0.0","workspaces":["editor"]}
+> {"name":"ignore-lab-parent","version":"1.0.0","workspaces":["child"]}
 > EOF
-> cd editor
+> cd child
 > npm pack --dry-run --json | jq '[.[].files[].path] | sort'
 [
   ".env",
-  "editor/inside.txt",
+  "child/inside.txt",
   "package.json",
   "public.txt"
 ]
@@ -88,7 +128,7 @@ $ : > .npmignore
 > npm pack --dry-run --json | jq '[.[].files[].path] | sort'
 [
   ".env",
-  "editor/inside.txt",
+  "child/inside.txt",
   "package.json",
   "public.txt"
 ]
@@ -101,7 +141,7 @@ $ printf '!secret.txt\n' > .npmignore
 > npm pack --dry-run --json | jq '[.[].files[].path] | sort'
 [
   ".env",
-  "editor/inside.txt",
+  "child/inside.txt",
   "package.json",
   "public.txt",
   "secret.txt"
@@ -115,7 +155,7 @@ $ rm .npmignore
 > printf '.env\n' > ../.npmignore
 > npm pack --dry-run --json | jq '[.[].files[].path] | sort'
 [
-  "editor/inside.txt",
+  "child/inside.txt",
   "package.json",
   "public.txt",
   "secret.txt"
@@ -129,30 +169,30 @@ $ printf '/secret.txt\n' > ../.npmignore
 > npm pack --dry-run --json | jq '[.[].files[].path] | sort'
 [
   ".env",
-  "editor/inside.txt",
+  "child/inside.txt",
   "package.json",
   "public.txt"
 ]
 ```
 
-## 父规则 /editor：父包清单
+## 父规则 /child：父包清单
 
 ```scrut
 $ cd ..
-> printf '/editor\n' > .npmignore
+> printf '/child\n' > .npmignore
 > npm pack --dry-run --json | jq '[.[].files[].path] | sort'
 [
   ".env",
   "package.json",
-  "root.txt",
+  "parent.txt",
   "secret.txt"
 ]
 ```
 
-## 父规则 /editor：子包会空吗？里面的 editor/ 呢？
+## 父规则 /child：子包会空吗？里面的 child/ 呢？
 
 ```scrut
-$ cd editor
+$ cd child
 > npm pack --dry-run --json | jq '[.[].files[].path] | sort'
 [
   ".env",
@@ -162,12 +202,12 @@ $ cd editor
 ]
 ```
 
-## 改用父 .gitignore 的 /editor，结果相同吗？
+## 改用父 .gitignore 的 /child，结果相同吗？
 
 ```scrut
 $ cd ..
 > mv .npmignore .gitignore
-> cd editor
+> cd child
 > npm pack --dry-run --json | jq '[.[].files[].path] | sort'
 [
   ".env",
@@ -183,10 +223,10 @@ $ cd ..
 $ cd ..
 > rm .gitignore
 > printf 'secret.txt\n' > .npmignore
-> cat > editor/package.json <<'EOF'
-> {"name":"ignore-lab-editor","version":"1.0.0","files":["secret.txt"]}
+> cat > child/package.json <<'EOF'
+> {"name":"ignore-lab-child","version":"1.0.0","files":["secret.txt"]}
 > EOF
-> cd editor
+> cd child
 > npm pack --dry-run --json | jq '[.[].files[].path] | sort'
 [
   "package.json",
@@ -199,19 +239,19 @@ $ cd ..
 ```scrut
 $ cd ..
 > rm .npmignore
-> cat > editor/package.json <<'EOF'
-> {"name":"ignore-lab-editor","version":"1.0.0"}
+> cat > child/package.json <<'EOF'
+> {"name":"ignore-lab-child","version":"1.0.0"}
 > EOF
 > npm pack --dry-run --json | jq '[.[].files[].path] | sort'
 [
   ".env",
-  "editor/.env",
-  "editor/editor/inside.txt",
-  "editor/package.json",
-  "editor/public.txt",
-  "editor/secret.txt",
+  "child/.env",
+  "child/child/inside.txt",
+  "child/package.json",
+  "child/public.txt",
+  "child/secret.txt",
   "package.json",
-  "root.txt",
+  "parent.txt",
   "secret.txt"
 ]
 ```
@@ -222,21 +262,21 @@ $ cd ..
 $ npm pack --dry-run --json --workspaces --include-workspace-root | jq 'map({name, files: ([.files[].path] | sort)}) | sort_by(.name)'
 [
   {
-    "name": "ignore-lab-editor",
+    "name": "ignore-lab-child",
     "files": [
       ".env",
-      "editor/inside.txt",
+      "child/inside.txt",
       "package.json",
       "public.txt",
       "secret.txt"
     ]
   },
   {
-    "name": "ignore-lab-root",
+    "name": "ignore-lab-parent",
     "files": [
       ".env",
       "package.json",
-      "root.txt",
+      "parent.txt",
       "secret.txt"
     ]
   }
@@ -247,14 +287,14 @@ $ npm pack --dry-run --json --workspaces --include-workspace-root | jq 'map({nam
 
 ```scrut
 $ npm pack --json --pack-destination "$LAB_TMP/artifacts" > "$LAB_TMP/pack-result.json"
-> tar -tzf "$LAB_TMP/artifacts/ignore-lab-root-1.0.0.tgz" | LC_ALL=C sort
+> tar -tzf "$LAB_TMP/artifacts/ignore-lab-parent-1.0.0.tgz" | LC_ALL=C sort
 package/.env
-package/editor/.env
-package/editor/editor/inside.txt
-package/editor/package.json
-package/editor/public.txt
-package/editor/secret.txt
+package/child/.env
+package/child/child/inside.txt
+package/child/package.json
+package/child/public.txt
+package/child/secret.txt
 package/package.json
-package/root.txt
+package/parent.txt
 package/secret.txt
 ```
