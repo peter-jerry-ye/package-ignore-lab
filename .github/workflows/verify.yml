@@ -1,0 +1,45 @@
+name: Verify documented behavior
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: node
+      - name: Install latest npm and pnpm
+        run: npm install --global npm@latest pnpm@latest
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - uses: moonbit-community/setup-moonbit@main
+        with:
+          version: latest
+      - name: Install latest Scrut release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/scrut"
+          gh release download --repo facebookincubator/scrut --pattern '*linux-x86_64.tar.gz' --dir "$RUNNER_TEMP/scrut"
+          tar -xzf "$RUNNER_TEMP"/scrut/*.tar.gz --strip-components=1 -C "$RUNNER_TEMP/scrut"
+          echo "$RUNNER_TEMP/scrut" >> "$GITHUB_PATH"
+      - name: Verify every command and expected output
+        run: ./scripts/test.sh
+      - name: Show result
+        if: success()
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+          所有 Markdown 测试已用最新版工具重新执行，输出与文档一致。
+
+          直接阅读仓库 README 的结论表，以及 tests/ 中的命令和输出即可；无需查看日志。
+          SUMMARY
