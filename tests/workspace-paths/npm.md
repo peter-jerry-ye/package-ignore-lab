@@ -46,10 +46,10 @@ $ cat > ../child/package.json <<'EOF'
 
 ## 从 workspace 根目录枚举成员
 
-下面保留完整 JSON 输出；不安装依赖，也不访问包注册表。
+用 `--json` 显式选择 JSON，保留完整输出；不安装依赖，也不访问包注册表。
 
 ```scrut
-$ npm pkg get name --workspaces
+$ npm pkg get name --workspaces --json
 {
   "child": "child"
 }
