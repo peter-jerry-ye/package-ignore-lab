@@ -51,7 +51,9 @@ $ cat > ../child/package.json <<'EOF'
 ```scrut
 $ npm pkg get name --workspaces --json
 {
-  "child": "child"
+  "child": {
+    "name": "child"
+  }
 }
 ```
 
